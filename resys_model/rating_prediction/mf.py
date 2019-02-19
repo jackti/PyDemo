@@ -14,7 +14,8 @@ import time
 
 import tensorflow as tf
 import numpy as np
-import os
+
+from resys_model.utils.evaluation.RatingMetrics import RMSE, MAE
 
 
 class MF(object):
@@ -42,7 +43,7 @@ class MF(object):
         self.Q = tf.Variable(tf.random_normal([self.num_item, num_factor], stddev=0.01))
 
         self.Bias_U = tf.Variable(tf.random_normal([self.num_user], stddev=0.01))
-        self.Bias_I = tf.Variable(tf.random_normal([self.num_item], dtype=0.01))
+        self.Bias_I = tf.Variable(tf.random_normal([self.num_item], stddev=0.01))
 
         user_latent_factor = tf.nn.embedding_lookup(self.P, self.user_id)
         item_latent_factor = tf.nn.embedding_lookup(self.Q, self.item_id)
@@ -51,6 +52,9 @@ class MF(object):
 
         interaction = tf.multiply(user_latent_factor, item_latent_factor)
         self.pred_rating = tf.reduce_sum(interaction, axis=1) + user_bias + item_bias
+
+    def predict(self, user_id, item_id):
+        return self.sess.run([self.pred_rating], feed_dict={self.user_id: user_id, self.item_id: item_id})[0]
 
     def execute(self, train_data, test_data):
         t = train_data.tocoo()
@@ -67,6 +71,13 @@ class MF(object):
         init = tf.global_variables_initializer()
         self.sess.run(init)
 
+        for epoch in range(self.epochs):
+            print("Epoch:%04d;" % epoch)
+            self.train(train_data)
+
+            if epoch % self.T == 0:
+                self.test(test_data)
+
     def train(self, train_data):
         self.num_train = len(train_data)
         num_batch = int(self.num_train / self.batch_size)
@@ -82,7 +93,22 @@ class MF(object):
             batch_item = shuffle_item[i * self.batch_size:(i + 1) * self.batch_size]
             batch_rating = shuffle_rating[i * self.batch_size:(i + 1) * self.batch_size]
 
-            self.sess.run([])
+            _, loss = self.sess.run([self.optimizer, self.loss], feed_dict={self.user_id: batch_user,
+                                                                            self.item_id: batch_item,
+                                                                            self.y: batch_rating})
+            if i % self.display_step == 0:
+                print("Index:%04d; cost=%.9f" % (i + 1, np.mean(loss)))
+                if self.show_time:
+                    print("one iteration:%s seconds." % (time.time() - start_time))
 
-            print("hello");
-            print("testx")
+    def test(self, test_data):
+        error = 0.0
+        error_mae = 0.0
+        test_set = list(test_data.keys())
+
+        for (u, i) in test_set:
+            pred_rating_test = self.predict([u], [i])
+            error += (float(test_data.get((u, i))) - pred_rating_test) ** 2
+            error_mae += (np.abs(float(test_data.get((u, i))) - pred_rating_test))
+
+        print("RMSE:" + str(RMSE(error, len(test_set))[0]) + "; MAE:" + str(MAE(error, len(test_set))[0]))
