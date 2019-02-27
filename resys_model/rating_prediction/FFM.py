@@ -2,14 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 -----------------------------------------------
-    File Name:  fm.py
+    File Name:  FFM.py
     Author:     tigong
-    Date:       19-2-18
+    Date:       19-2-27
     Description:
 -----------------------------------------------
     Change Activity:
 -----------------------------------------------
 """
+import os
+import sys
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -55,49 +57,52 @@ def dataGenerate(path="../data/fm_train.csv"):
     return x_t, train_y.reshape(-1, 1), files_dict
 
 
-def FM(xtrain, ytrain, epochs=1000, learning_rate=0.001,
-       k=10, display_step=200, fm=True, seed=0):
-    tf.set_random_seed(seed)
+def FFM(xtrain, ytrain, field_dict, train_steps=1000, learning_rate=0.001, K=10,
+        display_information=100, ffm=True, seed=0):
+    tf.set_random_seed(seed=seed)
 
     n = xtrain.shape[1]
 
-    x = tf.placeholder(tf.float32, shape=[None, n], name="x")
-    y = tf.placeholder(tf.int32, shape=[None, 1], name="y")
+    f = sorted(field_dict.items(), key=lambda x: x[1], reverse=True)[0][1]
 
-    V = tf.get_variable("V", shape=[n, k], dtype=tf.float32,
-                        initializer=tf.truncated_normal_initializer(stddev=0.01))
-    W = tf.get_variable("W", shape=[n, 2], dtype=tf.float32,
-                        initializer=tf.truncated_normal_initializer(stddev=0.01))
-    b = tf.get_variable("b", shape=[2], dtype=tf.float32, initializer=tf.zeros_initializer())
+    x = tf.placeholder(tf.float32, shape=[None, n], name="x")
+    y = tf.placeholder(tf.float32, shape=[None, 1], name="y")
+
+    V = tf.get_variable("V", shape=[f + 1, n, K], dtype=tf.float32,
+                        initializer=tf.truncated_normal_initializer(stddev=0.3))
+    W = tf.get_variable("W", shape=[n, 1], dtype=tf.float32,
+                        initializer=tf.truncated_normal_initializer(stddev=0.3))
+    b = tf.get_variable("b", shape=[1, 1], dtype=tf.float32, initializer=tf.zeros_initializer())
 
     logits = tf.matmul(x, W) + b
-    print("logits:", logits)
 
-    if fm:
-        inner = tf.square(tf.matmul(x, V)) - tf.matmul(tf.square(x), tf.square(V))
-        fm_hat = tf.multiply(0.5, tf.reduce_sum(inner, axis=1, keep_dims=True))
+    if ffm:
+        fm_hat = tf.constant(0.0, dtype=tf.float32)
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                fm_hat += tf.multiply(
+                    tf.reduce_mean(tf.multiply(V[field_dict[j], i], V[field_dict[i], j])),
+                    tf.reshape(tf.multiply(x[:, i], x[:, j]), [-1, 1])
+                )
 
         logits = logits + fm_hat
 
+    loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=y, logits=logits))
     y_hat = tf.nn.sigmoid(logits)
-
-
-    loss = tf.reduce_mean(
-        tf.nn.sparse_softmax_cross_entropy_with_logits(labels=tf.reshape(y, [-1]), logits=logits))
-
-    optimizer = tf.train.AdamOptimizer(learning_rate).minimize(loss)
+    optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(loss)
 
     with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+        sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
 
-        for epoch in range(epochs):
-            batch_loss, _, y_h = sess.run([loss, optimizer, y_hat], feed_dict={x: xtrain, y: ytrain})
+        for i in range(train_steps):
+            batch_loss, _, batch_y = sess.run([loss, optimizer, y_hat], feed_dict={x: xtrain, y: ytrain})
 
-            if epochs % display_step == 0:
-                print("Train loss is :%.6f" % batch_loss)
+            if i % display_information == 0:
+                print("Train step=%4d  Train loss=%.6f" % (i, batch_loss))
 
 
 if __name__ == '__main__':
     x_train, y_train, field_dict = dataGenerate(path="../data/fm_train.csv")
 
-    FM(x_train, y_train)
+    FFM(x_train, y_train, field_dict)
