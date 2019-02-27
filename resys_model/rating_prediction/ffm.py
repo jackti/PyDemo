@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 -----------------------------------------------
-    File Name:  FFM.py
+    File Name:  ffm.py
     Author:     tigong
     Date:       19-2-27
     Description:
